@@ -1,7 +1,6 @@
 import os
 import json
 import logging
-import re
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, CommandHandler, ContextTypes
 
@@ -54,72 +53,72 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     used_codes_count = len(load_used_codes())
     await update.message.reply_text(
         f"👋 Xush kelibsiz, admin!\n\n"
-        f"Menga **video fayl** yuboring. Men:\n"
-        f"1️⃣ Video faylni qabul qilaman\n"
-        f"2️⃣ Takrorlanmas 3 xonali kod biriktiraman (001-999)\n"
-        f"3️⃣ Videoni kanalga **fayl (document)** sifatida joylayman (2 GB gacha)\n\n"
+        f"Menga **video fayl** yuboring. Men avtomatik 3 xonali kod biriktiraman va kanalga joylayman.\n"
+        f"Agar biror kodni qayta ishlatmoqchi bo‘lsangiz (masalan, kanaldan o‘chirilgan bo‘lsa), /reset 007 deb yozing.\n\n"
         f"📊 Ishlatilgan kodlar: {used_codes_count} / 999"
     )
 
-# ==================== VIDEO FAYLNI QABUL QILISH ====================
+# ==================== KODNI QAYTA ISHLATISH (RESET) ====================
+async def reset_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id not in ALLOWED_USERS:
+        await update.message.reply_text("❌ Kechirasiz, bu buyruq faqat adminlar uchun.")
+        return
+
+    args = context.args
+    if not args or len(args) != 1:
+        await update.message.reply_text("❌ Iltimos, bitta 3 xonali kod yozing. Masalan: /reset 007")
+        return
+
+    code = args[0].strip()
+    if not (code.isdigit() and len(code) == 3):
+        await update.message.reply_text("❌ Kod 3 xonali son bo‘lishi kerak.")
+        return
+
+    used = load_used_codes()
+    if code in used:
+        used.remove(code)
+        save_used_codes(used)
+        await update.message.reply_text(f"✅ {code} kodi qayta ishlatish uchun bo‘shatildi.")
+    else:
+        await update.message.reply_text(f"❌ {code} kodi ishlatilmagan yoki mavjud emas.")
+
+# ==================== VIDEO QABUL QILISH ====================
 async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id not in ALLOWED_USERS:
         return
 
-    # Video yoki hujjat kelganini tekshirish
     video = update.message.video
-    document = update.message.document
-    if not video and not document:
+    if not video:
         await update.message.reply_text("❌ Iltimos, video fayl yuboring.")
         return
 
-    # 1. Yangi kod olish
     try:
         code = get_next_code()
     except Exception as e:
         await update.message.reply_text(f"❌ {str(e)}")
         return
 
-    # 2. Kanalga joylash uchun faylni olish
     status_msg = await update.message.reply_text("⏳ Video kanalga joylanmoqda...")
-
     try:
-        if video:
-            # Video faylni olish
-            file_id = video.file_id
-            sent = await context.bot.send_video(
-                chat_id=CHANNEL_ID,
-                video=file_id,
-                caption=f"Kino: {video.file_name if hasattr(video, 'file_name') else 'Video'}\nKOD {code}"
-            )
-        elif document and document.mime_type and document.mime_type.startswith('video/'):
-            # Video hujjat sifatida kelgan bo'lsa
-            file_id = document.file_id
-            sent = await context.bot.send_document(
-                chat_id=CHANNEL_ID,
-                document=file_id,
-                caption=f"Kino: {document.file_name}\nKOD {code}"
-            )
-        else:
-            await update.message.reply_text("❌ Bu video fayl emas.")
-            return
-
-        # Kodni ishlatilgan deb belgilash
+        sent = await context.bot.send_video(
+            chat_id=CHANNEL_ID,
+            video=video.file_id,
+            caption=f"Kino: {video.file_name if video.file_name else 'Video'}\nKOD {code}"
+        )
         mark_code_used(code)
 
-        # Admin ga xabar
         channel_username = "moviysky"
         post_url = f"https://t.me/{channel_username}/{sent.message_id}"
         used_count = len(load_used_codes())
         await update.message.reply_text(
             f"✅ Kino kanalga joylandi!\n\n"
-            f"📌 Kod: `{code}` (takrorlanmas)\n"
+            f"📌 Kod: `{code}`\n"
             f"📊 Ishlatilgan kodlar: {used_count} / 999\n\n"
             f"🔗 Post: {post_url}",
             parse_mode="Markdown"
         )
-
     except Exception as e:
         logger.error(f"Kanalga joylashda xatolik: {e}")
         await update.message.reply_text(f"❌ Xatolik yuz berdi: {e}")
@@ -128,12 +127,9 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
-    # Faqat video va video hujjatlarini qabul qilish
-    app.add_handler(MessageHandler(
-        filters.VIDEO | filters.Document.VIDEO,
-        handle_video
-    ))
-    print("🤖 Admin bot (faqat video qabul qiladi) ishga tushdi...")
+    app.add_handler(CommandHandler("reset", reset_code))
+    app.add_handler(MessageHandler(filters.VIDEO, handle_video))
+    print("🤖 Admin bot (qayta ishlatish funksiyasi bilan) ishga tushdi...")
     app.run_polling()
 
 if __name__ == "__main__":
