@@ -53,8 +53,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     used_codes_count = len(load_used_codes())
     await update.message.reply_text(
         f"👋 Xush kelibsiz, admin!\n\n"
-        f"Menga **video fayl** yuboring. Men avtomatik 3 xonali kod biriktiraman va kanalga joylayman.\n"
-        f"Agar biror kodni qayta ishlatmoqchi bo‘lsangiz (masalan, kanaldan o‘chirilgan bo‘lsa), /reset 007 deb yozing.\n\n"
+        f"Menga **video** yoki **fayl (document)** ko‘rinishidagi kinoni yuboring. Men avtomatik 3 xonali kod biriktiraman va kanalga joylayman.\n"
+        f"Agar biror kodni qayta ishlatmoqchi bo‘lsangiz, /reset 007 deb yozing.\n\n"
         f"📊 Ishlatilgan kodlar: {used_codes_count} / 999"
     )
 
@@ -83,15 +83,18 @@ async def reset_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text(f"❌ {code} kodi ishlatilmagan yoki mavjud emas.")
 
-# ==================== VIDEO QABUL QILISH ====================
-async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ==================== VIDEO/FILE QABUL QILISH ====================
+async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id not in ALLOWED_USERS:
         return
 
     video = update.message.video
-    if not video:
-        await update.message.reply_text("❌ Iltimos, video fayl yuboring.")
+    document = update.message.document
+
+    # Video yoki document (video fayl) ekanligini tekshirish
+    if not video and not (document and document.mime_type and document.mime_type.startswith('video/')):
+        await update.message.reply_text("❌ Iltimos, video yoki video fayl yuboring.")
         return
 
     try:
@@ -100,13 +103,23 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ {str(e)}")
         return
 
-    status_msg = await update.message.reply_text("⏳ Video kanalga joylanmoqda...")
+    status_msg = await update.message.reply_text("⏳ Kino kanalga joylanmoqda...")
+
     try:
-        sent = await context.bot.send_video(
-            chat_id=CHANNEL_ID,
-            video=video.file_id,
-            caption=f"Kino: {video.file_name if video.file_name else 'Video'}\nKOD {code}"
-        )
+        # Video yoki document sifatida yuborish
+        if video:
+            sent = await context.bot.send_video(
+                chat_id=CHANNEL_ID,
+                video=video.file_id,
+                caption=f"Kino: {video.file_name if video.file_name else 'Video'}\nKOD {code}"
+            )
+        else:  # document (video fayl)
+            sent = await context.bot.send_document(
+                chat_id=CHANNEL_ID,
+                document=document.file_id,
+                caption=f"Kino: {document.file_name if document.file_name else 'Video'}\nKOD {code}"
+            )
+
         mark_code_used(code)
 
         channel_username = "moviysky"
@@ -128,8 +141,12 @@ def main():
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("reset", reset_code))
-    app.add_handler(MessageHandler(filters.VIDEO, handle_video))
-    print("🤖 Admin bot (qayta ishlatish funksiyasi bilan) ishga tushdi...")
+    # Video va video documentlarni qabul qilish
+    app.add_handler(MessageHandler(
+        filters.VIDEO | filters.Document.VIDEO,
+        handle_media
+    ))
+    print("🤖 Admin bot (video + document) ishga tushdi...")
     app.run_polling()
 
 if __name__ == "__main__":
